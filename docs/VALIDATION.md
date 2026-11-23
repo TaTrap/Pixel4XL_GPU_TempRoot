@@ -27,6 +27,8 @@ The public repo contains no device serial, username, or personal computer path.
 7. Ran `ROOT_TEMP.bat` after reboot and confirmed that root was recreated.
 8. Compared the active boot partition with the stock hash above before and after testing; no partition write occurred.
 9. Ran the standalone public repo from a clean boot: verified `locked=1`, `green`, the expected kernel, deployment from `bin/`, successful root, and output without NUL bytes.
+10. Broker disconnect regression: the pre-patch binary lost the daemon after a client was killed during output. With `SIGPIPE` ignored in the broker, 10/10 identical disconnect rounds passed; every subsequent `id` returned `uid=0` and broker PID `20861` remained unchanged.
+11. Hardened broker protocol: all 50 final-marker checks passed and the `seq 1 10000` output hash matched exactly; a 35-second command returned `0`; a 130,000,000-byte output completed in four seconds and the next command returned `0`; another 10/10 disconnect rounds passed with broker PID `21305` unchanged; empty and stalled clients did not block the next command; a peer switched to UID `10000` was disconnected without command output (`read=0`).
 
 ## Key output
 
@@ -50,7 +52,7 @@ One attempt won the race but ended with `pt_candidates=0`. The binary exited wit
 Validated ARM64 binary SHA-256:
 
 ```text
-60f8ee3a9ce56d491297c127fc899fff7e5e967113a8c0149a79741cc9c54958  bin/coral_root
+6f0a1ec0d80122ddf464bdd4893dd24bf426dad13acb03b0e5e830a66101222f  bin/coral_root
 ```
 
 The latest checksums for all files are in [SHA256SUMS.txt](../SHA256SUMS.txt).

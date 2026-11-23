@@ -19,6 +19,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -866,8 +867,25 @@ static int prepare_root_socket(void) {
     return fd;
 }
 
+static int write_client_all(int fd, const void *data, size_t length) {
+    const unsigned char *buffer = data;
+    size_t offset = 0;
+    while (offset < length) {
+        ssize_t sent = write(fd, buffer + offset, length - offset);
+        if (sent > 0) {
+            offset += (size_t)sent;
+            continue;
+        }
+        if (sent < 0 && errno == EINTR)
+            continue;
+        return -1;
+    }
+    return 0;
+}
+
 static void run_shell_broker(struct shared_state *shared) {
     int listener = root_listener;
+    signal(SIGPIPE, SIG_IGN);
     setsid();
     prctl(PR_SET_NAME, "coral_broker", 0, 0, 0);
     close(root_output_pipe[1]);
@@ -884,6 +902,8 @@ static void run_shell_broker(struct shared_state *shared) {
     __atomic_store_n(&shared->daemon_stage, 1, __ATOMIC_RELEASE);
     for (;;) {
         size_t used = 0;
+        int command_complete = 0;
+        int client_dead = 0;
         int client = accept(listener, NULL, NULL);
         if (client < 0) {
             if (errno == EINTR)
@@ -891,47 +911,69 @@ static void run_shell_broker(struct shared_state *shared) {
             usleep(10000);
             continue;
         }
+        struct ucred peer;
+        socklen_t peer_length = sizeof(peer);
+        if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &peer_length) != 0 ||
+            peer_length != sizeof(peer) || (peer.uid != 0 && peer.uid != 2000)) {
+            close(client);
+            continue;
+        }
+        struct timeval receive_timeout = {.tv_sec = 5, .tv_usec = 0};
+        if (setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+                       &receive_timeout, sizeof(receive_timeout)) != 0) {
+            close(client);
+            continue;
+        }
         while (used + 1 < sizeof(shared->command)) {
             ssize_t got = read(client, shared->command + used, 1);
-            if (got <= 0)
-                break;
-            if (shared->command[used++] == '\0')
-                break;
+            if (got > 0) {
+                ++used;
+                if (shared->command[used - 1] == '\0') {
+                    command_complete = 1;
+                    break;
+                }
+                continue;
+            }
+            if (got < 0 && errno == EINTR)
+                continue;
+            break;
         }
-        shared->command[used] = '\0';
+        if (!command_complete || used <= 1) {
+            close(client);
+            continue;
+        }
         shared->command_done = 0;
         unsigned int seq = __atomic_add_fetch(&shared->command_seq, 1, __ATOMIC_RELEASE);
-        for (unsigned int spins = 0; spins < 30000; ++spins) {
+        for (;;) {
+            int done = __atomic_load_n(&shared->command_done, __ATOMIC_ACQUIRE) == seq;
             char buffer[4096];
             ssize_t got = read(root_output_pipe[0], buffer, sizeof(buffer));
             if (got > 0) {
-                ssize_t offset = 0;
-                while (offset < got) {
-                    ssize_t sent = write(client, buffer + offset, (size_t)(got - offset));
-                    if (sent <= 0)
-                        break;
-                    offset += sent;
-                }
+                if (!client_dead && write_client_all(client, buffer, (size_t)got) != 0)
+                    client_dead = 1;
                 continue;
             }
             if (got == 0)
                 break;
-            if (__atomic_load_n(&shared->command_done, __ATOMIC_ACQUIRE) == seq &&
-                (errno == EAGAIN || errno == EWOULDBLOCK))
-                break;
-            usleep(1000);
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (done)
+                    break;
+                usleep(1000);
+                continue;
+            }
+            break;
         }
-        unsigned char result = 124;
+        unsigned char result = 1;
         if (shared->command_done == seq) {
             if (WIFEXITED(shared->child_status))
                 result = (unsigned char)WEXITSTATUS(shared->child_status);
             else if (WIFSIGNALED(shared->child_status))
                 result = (unsigned char)(128 + WTERMSIG(shared->child_status));
         }
-        if (write(client, &result, 1) != 1) {
-            close(client);
-            continue;
-        }
+        if (!client_dead)
+            write_client_all(client, &result, 1);
         close(client);
     }
 }

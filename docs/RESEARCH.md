@@ -47,7 +47,9 @@ The release uses shared-anonymous mappings. After the GPU replaces the PTE, the 
 
 ## Root broker and client
 
-The broker detaches from the launcher with its own session and standard file descriptors directed to `/dev/null`. The executor forks a child, sets UID/GID to `0`, and executes `/system/bin/sh -c <command>`.
+The broker detaches from the launcher with its own session and standard file descriptors directed to `/dev/null`. It ignores `SIGPIPE` and accepts only peer UID `0` or `2000`. Client input must be nonempty and NUL-terminated within five seconds.
+
+Commands run one at a time with no duration or output-size cap. After `command_done`, the broker keeps draining the output pipe until `EAGAIN` before sending the exit status. Writes retry on `EINTR`; a disconnected client is marked dead while the pipe continues to be drained, preventing output from leaking into the next command. The executor forks a child, sets UID/GID to `0`, and executes `/system/bin/sh -c <command>`.
 
 The client supports `su -c` directly on Android and `su --hex <command>` for the Windows scripts. `SU.bat` passes arguments to `scripts/su.ps1` with delayed expansion disabled; PowerShell encodes the command as UTF-8 hex. This prevents CMD from expanding `|`, `&&`, `&`, `>`, `<`, or consuming `!`, while preserving quotes, `;`, and `$()` through `adb shell`.
 

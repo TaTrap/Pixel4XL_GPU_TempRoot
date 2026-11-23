@@ -27,6 +27,8 @@ Không có serial thiết bị, tên user hoặc đường dẫn máy tính cá 
 7. Chạy lại `ROOT_TEMP.bat` sau reboot và xác nhận root được tạo lại.
 8. Đối chiếu active boot partition trước/sau kiểm thử bằng hash stock nêu trên; không có partition write.
 9. Chạy lại repo public độc lập từ boot sạch: kiểm tra `locked=1`, `green`, đúng kernel, deploy từ `bin/`, root thành công và output không còn byte NUL.
+10. Regression khi ngắt client: binary trước vá mất daemon sau khi client bị kill giữa output. Sau khi broker bỏ qua `SIGPIPE`, 10/10 vòng ngắt tương tự đều pass; mọi lệnh `id` tiếp theo trả `uid=0` và broker PID `20861` không đổi.
+11. Protocol broker đã tăng cường: 50/50 kiểm tra marker cuối đều pass và hash output `seq 1 10000` khớp chính xác; lệnh 35 giây trả `0`; output 130.000.000 byte hoàn tất trong bốn giây và lệnh tiếp theo trả `0`; thêm 10/10 vòng disconnect pass với broker PID `21305` không đổi; client rỗng hoặc im lặng không chặn lệnh tiếp theo; peer đổi sang UID `10000` bị đóng kết nối mà không có output lệnh (`read=0`).
 
 ## Kết quả chính
 
@@ -50,7 +52,7 @@ Một lần chạy thắng race nhưng kết thúc bằng `pt_candidates=0`. Bin
 SHA-256 của binary ARM64 đã kiểm chứng:
 
 ```text
-60f8ee3a9ce56d491297c127fc899fff7e5e967113a8c0149a79741cc9c54958  bin/coral_root
+6f0a1ec0d80122ddf464bdd4893dd24bf426dad13acb03b0e5e830a66101222f  bin/coral_root
 ```
 
 Checksum mới nhất của toàn bộ file nằm trong [SHA256SUMS.txt](../SHA256SUMS.txt).

@@ -47,7 +47,9 @@ Bản phát hành dùng shared-anonymous mapping. Sau khi GPU thay PTE, process 
 
 ## Root broker và client
 
-Broker tách khỏi launcher bằng session riêng và file descriptor chuẩn trỏ tới `/dev/null`. Executor tạo process con, đặt UID/GID về `0` rồi exec `/system/bin/sh -c <command>`.
+Broker tách khỏi launcher bằng session riêng và file descriptor chuẩn trỏ tới `/dev/null`. Broker bỏ qua `SIGPIPE` và chỉ chấp nhận peer UID `0` hoặc `2000`. Input từ client phải khác rỗng và kết thúc bằng NUL trong tối đa năm giây.
+
+Các lệnh chạy tuần tự, không giới hạn thởi gian hoặc dung lượng output. Sau `command_done`, broker tiếp tục đọc pipe tới khi nhận `EAGAIN` rồi mới gửi exit status. Write được retry khi gặp `EINTR`; client đã ngắt được đánh dấu dead nhưng pipe vẫn được đọc cạn, tránh output rò sang lệnh tiếp theo. Executor tạo process con, đặt UID/GID về `0` rồi exec `/system/bin/sh -c <command>`.
 
 Client hỗ trợ `su -c` trực tiếp trên Android và `su --hex <command>` cho script Windows. `SU.bat` chuyển tham số sang `scripts/su.ps1` với delayed expansion bị tắt; PowerShell mã hóa command thành UTF-8 hex. Cách này tránh CMD bung `|`, `&&`, `&`, `>`, `<` hoặc nuốt `!`, đồng thời giữ đúng dấu nháy, `;`, `$()` qua lớp `adb shell`.
 
